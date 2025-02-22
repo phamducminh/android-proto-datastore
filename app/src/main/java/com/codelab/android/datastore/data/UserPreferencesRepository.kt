@@ -17,9 +17,15 @@
 package com.codelab.android.datastore.data
 
 import android.content.Context
+import android.util.Log
 import androidx.core.content.edit
+import androidx.datastore.core.DataStore
+import com.codelab.android.datastore.UserPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import java.io.IOException
 
 private const val USER_PREFERENCES_NAME = "user_preferences"
 private const val SORT_ORDER_KEY = "sort_order"
@@ -34,7 +40,23 @@ enum class SortOrder {
 /**
  * Class that handles saving and retrieving user preferences
  */
-class UserPreferencesRepository private constructor(context: Context) {
+class UserPreferencesRepository(
+    private val userPreferencesStore: DataStore<UserPreferences>,
+    context: Context
+) {
+
+    private val TAG: String = "UserPreferencesRepo"
+
+    val userPreferencesFlow: Flow<UserPreferences> = userPreferencesStore.data
+        .catch { exception ->
+            // dataStore.data throws an IOException when an error is encountered when reading data
+            if (exception is IOException) {
+                Log.e(TAG, "Error reading sort order preferences.", exception)
+                emit(UserPreferences.getDefaultInstance())
+            } else {
+                throw exception
+            }
+        }
 
     private val sharedPreferences =
         context.applicationContext.getSharedPreferences(USER_PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -92,26 +114,15 @@ class UserPreferencesRepository private constructor(context: Context) {
         _sortOrderFlow.value = newSortOrder
     }
 
-    private fun updateSortOrder(sortOrder: SortOrder) {
-        sharedPreferences.edit {
-            putString(SORT_ORDER_KEY, sortOrder.name)
+    suspend fun updateShowCompleted(completed: Boolean) {
+        userPreferencesStore.updateData { preferences ->
+            preferences.toBuilder().setShowCompleted(completed).build()
         }
     }
 
-    companion object {
-        @Volatile
-        private var INSTANCE: UserPreferencesRepository? = null
-
-        fun getInstance(context: Context): UserPreferencesRepository {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE?.let {
-                    return it
-                }
-
-                val instance = UserPreferencesRepository(context)
-                INSTANCE = instance
-                instance
-            }
+    private fun updateSortOrder(sortOrder: SortOrder) {
+        sharedPreferences.edit {
+            putString(SORT_ORDER_KEY, sortOrder.name)
         }
     }
 }
